@@ -1,4 +1,5 @@
--- Client-side LocalScript based on CoolKidd GUI style for Mobile Compatible Flight, Teleports, Invisibility, NoClip, and More
+-- Client-side LocalScript mimicking CoolKidd GUI behavior (no buttons, keybinds & mobile compatible)
+-- Features: Flight, Teleports (to player, to me, to void), Invisibility, NoClip
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -8,7 +9,7 @@ local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
 local rootPart = character:WaitForChild("HumanoidRootPart")
 
--- Flight variables
+-- Settings
 local flightSpeed = 50
 local flightEnabled = false
 local noclipEnabled = false
@@ -41,10 +42,11 @@ local function toggleFlight(state)
 end
 
 -- Toggle NoClip
+local noclipConnection
 local function toggleNoClip(state)
     noclipEnabled = state
     if noclipEnabled then
-        RunService.Stepped:Connect(function()
+        noclipConnection = RunService.Stepped:Connect(function()
             for _, part in pairs(character:GetChildren()) do
                 if part:IsA("BasePart") then
                     part.CanCollide = false
@@ -52,6 +54,10 @@ local function toggleNoClip(state)
             end
         end)
     else
+        if noclipConnection then
+            noclipConnection:Disconnect()
+            noclipConnection = nil
+        end
         for _, part in pairs(character:GetChildren()) do
             if part:IsA("BasePart") then
                 part.CanCollide = true
@@ -105,79 +111,116 @@ local function flightControl()
         moveVector = moveVector - Vector3.new(0, 1, 0)
     end
 
-    moveVector = moveVector.Unit * flightSpeed
-    if moveVector.Magnitude == 0 then
-        bodyVelocity.Velocity = Vector3.new(0, 0, 0)
-    else
+    if moveVector.Magnitude > 0 then
+        moveVector = moveVector.Unit * flightSpeed
         bodyVelocity.Velocity = moveVector
         bodyGyro.CFrame = CFrame.new(rootPart.Position, rootPart.Position + moveVector)
+    else
+        bodyVelocity.Velocity = Vector3.new(0, 0, 0)
     end
 end
 
 RunService.RenderStepped:Connect(flightControl)
 
 -- Teleport Functions
-
-local function tpPlayerToPlayer(targetPlayerName)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
+local function tpPlayerToPlayer(targetName)
+    local targetPlayer = Players:FindFirstChild(targetName)
     if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
         rootPart.CFrame = targetPlayer.Character.HumanoidRootPart.CFrame + Vector3.new(0, 3, 0)
     end
 end
 
-local function tpPlayerToMe(targetPlayerName)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
+local function tpPlayerToMe(targetName)
+    local targetPlayer = Players:FindFirstChild(targetName)
     if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
         targetPlayer.Character.HumanoidRootPart.CFrame = rootPart.CFrame + Vector3.new(0, 3, 0)
     end
 end
 
-local function tpPlayerToVoid(targetPlayerName)
-    local targetPlayer = Players:FindFirstChild(targetPlayerName)
+local function tpPlayerToVoid(targetName)
+    local targetPlayer = Players:FindFirstChild(targetName)
     if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        -- Teleport below map to kill
         targetPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(0, -500, 0)
     end
 end
 
--- Example GUI buttons (CoolKidd style) setup (requires ScreenGui with buttons named accordingly)
-local playerGui = player:WaitForChild("PlayerGui")
-local gui = playerGui:WaitForChild("CoolKiddGui") -- Assume your GUI is named "CoolKiddGui"
+-- Keybinds for toggles and teleports (mobile compatible with on-screen keyboard)
 
-local flightToggleButton = gui:WaitForChild("FlightToggle")
-local noclipToggleButton = gui:WaitForChild("NoClipToggle")
-local invisToggleButton = gui:WaitForChild("InvisToggle")
-local tpToPlayerButton = gui:WaitForChild("TpToPlayer")
-local tpPlayerToMeButton = gui:WaitForChild("TpPlayerToMe")
-local tpToVoidButton = gui:WaitForChild("TpToVoid")
+-- Flight toggle: F
+-- NoClip toggle: N
+-- Invisibility toggle: I
+-- Teleport to player: T (prompts for player name)
+-- Teleport player to me: Y (prompts for player name)
+-- Teleport player to void: V (prompts for player name)
 
--- Button events
-flightToggleButton.MouseButton1Click:Connect(function()
-    toggleFlight(not flightEnabled)
+local function promptForPlayerName(action)
+    local TextService = game:GetService("TextService")
+    local InputGui = Instance.new("ScreenGui", player.PlayerGui)
+    InputGui.Name = "InputGui"
+    InputGui.ResetOnSpawn = false
+
+    local TextBox = Instance.new("TextBox", InputGui)
+    TextBox.Size = UDim2.new(0, 200, 0, 50)
+    TextBox.Position = UDim2.new(0.5, -100, 0.5, -25)
+    TextBox.PlaceholderText = "Enter player name for "..action
+    TextBox.Text = ""
+    TextBox.ClearTextOnFocus = true
+    TextBox.TextScaled = true
+    TextBox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    TextBox.TextColor3 = Color3.new(1,1,1)
+    TextBox.Font = Enum.Font.SourceSansBold
+    TextBox.TextStrokeTransparency = 0.75
+
+    local confirmed = false
+    local playerName = nil
+
+    TextBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            playerName = TextBox.Text
+            confirmed = true
+            InputGui:Destroy()
+        else
+            InputGui:Destroy()
+        end
+    end)
+
+    -- Wait for input or cancellation
+    repeat
+        RunService.RenderStepped:Wait()
+    until confirmed or not InputGui.Parent
+
+    return playerName
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.UserInputType == Enum.UserInputType.Keyboard then
+        local key = input.KeyCode
+        if key == Enum.KeyCode.F then
+            toggleFlight(not flightEnabled)
+        elseif key == Enum.KeyCode.N then
+            toggleNoClip(not noclipEnabled)
+        elseif key == Enum.KeyCode.I then
+            toggleInvisibility(not invisibilityEnabled)
+        elseif key == Enum.KeyCode.T then
+            local targetName = promptForPlayerName("Teleport to Player")
+            if targetName then
+                tpPlayerToPlayer(targetName)
+            end
+        elseif key == Enum.KeyCode.Y then
+            local targetName = promptForPlayerName("Teleport Player to Me")
+            if targetName then
+                tpPlayerToMe(targetName)
+            end
+        elseif key == Enum.KeyCode.V then
+            local targetName = promptForPlayerName("Teleport Player to Void")
+            if targetName then
+                tpPlayerToVoid(targetName)
+            end
+        end
+    end
 end)
 
-noclipToggleButton.MouseButton1Click:Connect(function()
-    toggleNoClip(not noclipEnabled)
-end)
+-- Mobile users can use the on-screen keyboard to trigger these keybinds.
 
-invisToggleButton.MouseButton1Click:Connect(function()
-    toggleInvisibility(not invisibilityEnabled)
-end)
-
-tpToPlayerButton.MouseButton1Click:Connect(function()
-    local targetName = gui.TargetPlayerName.Text
-    tpPlayerToPlayer(targetName)
-end)
-
-tpPlayerToMeButton.MouseButton1Click:Connect(function()
-    local targetName = gui.TargetPlayerName.Text
-    tpPlayerToMe(targetName)
-end)
-
-tpToVoidButton.MouseButton1Click:Connect(function()
-    local targetName = gui.TargetPlayerName.Text
-    tpPlayerToVoid(targetName)
-end)
-
--- Mobile controls can be added similarly by connecting TouchGui buttons to these functions.
-
+-- End of script
